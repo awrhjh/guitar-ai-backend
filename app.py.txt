@@ -1,0 +1,57 @@
+import os, uuid
+from fastapi import FastAPI, File, UploadFile
+from fastapi.responses import JSONResponse
+import librosa
+import numpy as np
+
+app = FastAPI()
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
+
+def chord_templates():
+    templates = {}
+    for i, root in enumerate(NOTE_NAMES):
+        major = np.roll([1 if j in [0,4,7] else 0 for j in range(12)], i)
+        minor = np.roll([1 if j in [0,3,7] else 0 for j in range(12)], i)
+        templates[f"{root}"] = major / np.linalg.norm(major)
+        templates[f"{root}m"] = minor / np.linalg.norm(minor)
+    return templates
+
+TEMPLATES = chord_templates()
+
+def chroma_to_chords(chroma, sr, hop_length, times):
+    timeline = []
+    for i in range(chroma.shape[1]):
+        v = chroma[:, i] / (np.linalg.norm(chroma[:, i]) + 1e-9)
+        best, best_score = None, -1
+        for name, templ in TEMPLATES.items():
+            score = float(np.dot(v, templ))
+            if score > best_score:
+                best_score, best = score, name
+        timeline.append({"time": float(times[i]), "chord": best})
+    return timeline
+
+@app.post("/upload")
+async def upload(file: UploadFile = File(...)):
+    filename = f"{uuid.uuid4()}_{file.filename}"
+    path = os.path.join(UPLOAD_DIR, filename)
+    with open(path, "wb") as f:
+        f.write(await file.read())
+
+    y, sr = librosa.load(path, sr=22050, mono=True)
+    tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+    hop_length = 512
+    chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=hop_length)
+    times = librosa.frames_to_time(np.arange(chroma.shape[1]), sr=sr, hop_length=hop_length)
+    timeline = chroma_to_chords(chroma, sr, hop_length, times)
+
+    simplified = []
+    last = None
+    for t in timeline:
+        if not last or t["chord"] != last["chord"]:
+            simplified.append({"start": t["time"], "chord": t["chord"]})
+            last = t
+
+    return JSONResponse({"tempo": tempo, "timeline": simplified})
