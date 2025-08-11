@@ -55,3 +55,4 @@ async def upload(file: UploadFile = File(...)):
             last = t
 
     return JSONResponse({"tempo": tempo, "timeline": simplified})
+
