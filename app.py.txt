@@ -1,16 +1,22 @@
-import os, uuid
+import os
+import uuid
 from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import JSONResponse
 import librosa
 import numpy as np
 
-app = FastAPI()
+# Create FastAPI app
+app = FastAPI(title="Guitar AI Backend", version="1.0")
+
+# Upload directory
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# Note names for chord detection
 NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
 
 def chord_templates():
+    """Create normalized major/minor chord templates."""
     templates = {}
     for i, root in enumerate(NOTE_NAMES):
         major = np.roll([1 if j in [0,4,7] else 0 for j in range(12)], i)
@@ -21,7 +27,8 @@ def chord_templates():
 
 TEMPLATES = chord_templates()
 
-def chroma_to_chords(chroma, sr, hop_length, times):
+def chroma_to_chords(chroma, times):
+    """Match chroma frames to closest chord templates."""
     timeline = []
     for i in range(chroma.shape[1]):
         v = chroma[:, i] / (np.linalg.norm(chroma[:, i]) + 1e-9)
@@ -33,20 +40,28 @@ def chroma_to_chords(chroma, sr, hop_length, times):
         timeline.append({"time": float(times[i]), "chord": best})
     return timeline
 
+@app.get("/")
+def root():
+    return {"message": "Guitar AI Backend is running!"}
+
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
+    """Upload audio file and detect chords."""
+    # Save uploaded file
     filename = f"{uuid.uuid4()}_{file.filename}"
     path = os.path.join(UPLOAD_DIR, filename)
     with open(path, "wb") as f:
         f.write(await file.read())
 
+    # Load and analyze audio
     y, sr = librosa.load(path, sr=22050, mono=True)
     tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
     hop_length = 512
     chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=hop_length)
     times = librosa.frames_to_time(np.arange(chroma.shape[1]), sr=sr, hop_length=hop_length)
-    timeline = chroma_to_chords(chroma, sr, hop_length, times)
+    timeline = chroma_to_chords(chroma, times)
 
+    # Simplify chord list
     simplified = []
     last = None
     for t in timeline:
@@ -55,4 +70,5 @@ async def upload(file: UploadFile = File(...)):
             last = t
 
     return JSONResponse({"tempo": tempo, "timeline": simplified})
+
 
