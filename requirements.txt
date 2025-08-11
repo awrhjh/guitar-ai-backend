@@ -1,9 +1,8 @@
-fastapi
-uvicorn
-python-multipart
-aiofiles
-librosa
-numpy
-soundfile
-scipy
- 
+fastapi==0.110.0
+uvicorn==0.29.0
+python-multipart==0.0.6
+aiofiles==23.2.1
+librosa==0.10.1
+numpy==1.26.4
+soundfile==0.12.1
+scipy==1.12.0 
